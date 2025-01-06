@@ -1,0 +1,17 @@
+venvs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+*.pyw
+*.pywz
+
+*.db
+*.sqlite
+*.sqlite3
+*.db3
+*.db-shm
+*.db-wal
+
+poetry.lock
