@@ -28,10 +28,16 @@ run:
 	@echo "Running the application..."
 	@python app.py
 
+# Run the string-based sharding demo
+run-matrix:
+	@echo "Running the application with Matrix-style IDs..."
+	@python app_matrix.py
+
 # Show help for all commands
 help:
 	@echo "Available commands:"
-	@echo "  clean         - Clean up and remove all PostgreSQL containers"
+	@echo "  clean        - Clean up and remove all PostgreSQL containers"
 	@echo "  db           - Create and start PostgreSQL containers using prepare-db.sh"
-	@echo "  run          - Run the Python application"
+	@echo "  run          - Run the Python application with numeric IDs"
+	@echo "  run-matrix   - Run the Python application with Matrix-style IDs"
 	@echo "  help         - Show this help message"

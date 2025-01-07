@@ -25,11 +25,9 @@ shards = [
         "user": "postgres",
         "password": "password",
     },
-    # Add more shards as needed
 ]
 
 
-# Function to connect to PostgreSQL and execute a query
 def connect_to_db(shard):
     conn = psycopg2.connect(
         host=shard["host"],
@@ -41,24 +39,21 @@ def connect_to_db(shard):
     return conn
 
 
-# Function to insert data into the appropriate shard
-def insert_into_shard(user_id, user_data):
-    # Determine the shard number based on user_id using modulo
-    shard_index = (user_id - 1) % len(shards)  # Changed // to %
+def insert_into_shard_string(user_id, user_data):
+    # Convert string user_id to numeric value using hash
+    hash_value = int(hashlib.md5(str(user_id).encode()).hexdigest(), 16)
+    shard_index = hash_value % len(shards)
 
     shard = shards[shard_index]
 
-    # Insert the data into the correct shard
     conn = connect_to_db(shard)
     cursor = conn.cursor()
 
-    # SQL to insert data (for example, a user table)
     insert_query = sql.SQL(
-        "INSERT INTO users (user_id, name, email) VALUES (%s, %s, %s)"
+        "INSERT INTO users2 (user_id, name, email) VALUES (%s, %s, %s)"
     )
     cursor.execute(insert_query, (user_id, user_data["name"], user_data["email"]))
 
-    # Commit the transaction and close the connection
     conn.commit()
     cursor.close()
     conn.close()
@@ -66,16 +61,28 @@ def insert_into_shard(user_id, user_data):
     print(f"Inserted user {user_id} into shard {shard['port']}.")
 
 
-# Example: Insert users into the appropriate shards
-users = [
-    {"user_id": 1, "name": "Alice", "email": "alice@example.com"},
-    {"user_id": 1001, "name": "Bob", "email": "bob@example.com"},
-    {"user_id": 2001, "name": "Charlie", "email": "charlie@example.com"},
-    {"user_id": 2005, "name": "David", "email": "david@example.com"},
-    {"user_id": 3001, "name": "Eve", "email": "eve@example.com"},
-    {"user_id": 3002, "name": "Frank", "email": "frank@example.com"},
+# Example Matrix-style users
+matrix_users = [
+    {
+        "user_id": "@alice:matrix.org",
+        "name": "Alice M",
+        "email": "alice.matrix@example.com",
+    },
+    {"user_id": "@bob:matrix.org", "name": "Bob M", "email": "bob.matrix@example.com"},
+    {
+        "user_id": "@charlie:matrix.org",
+        "name": "Charlie M",
+        "email": "charlie.matrix@example.com",
+    },
+    {
+        "user_id": "@david:matrix.org",
+        "name": "David M",
+        "email": "david.matrix@example.com",
+    },
+    {"user_id": "@eve:matrix.org", "name": "Eve M", "email": "eve.matrix@example.com"},
 ]
 
-# Insert each user into the corresponding shard
-for user in users:
-    insert_into_shard(user["user_id"], user)
+if __name__ == "__main__":
+    print("Inserting Matrix-style users...")
+    for user in matrix_users:
+        insert_into_shard_string(user["user_id"], user)
