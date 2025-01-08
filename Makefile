@@ -33,11 +33,23 @@ run-matrix:
 	@echo "Running the application with Matrix-style IDs..."
 	@python app_matrix.py
 
+# Prepare Citus cluster nodes
+prepare-citus:
+	@echo "Setting up Citus cluster..."
+	@bash prepare-citus-nodes.sh
+
+# Run Citus sharding example
+run-citus:
+	@echo "Running Citus sharding example..."
+	@python citus-example.py
+
 # Show help for all commands
 help:
 	@echo "Available commands:"
-	@echo "  clean        - Clean up and remove all PostgreSQL containers"
+	@echo "  clean         - Clean up and remove all PostgreSQL containers"
 	@echo "  db           - Create and start PostgreSQL containers using prepare-db.sh"
 	@echo "  run          - Run the Python application with numeric IDs"
 	@echo "  run-matrix   - Run the Python application with Matrix-style IDs"
+	@echo "  prepare-citus - Set up Citus cluster nodes"
+	@echo "  run-citus    - Run Citus sharding example"
 	@echo "  help         - Show this help message"
