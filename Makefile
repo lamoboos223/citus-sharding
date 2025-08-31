@@ -1,97 +1,107 @@
-# Define variables for the PostgreSQL containers
-NUM_CONTAINERS := 3
-BASE_PORT := 5432
-PG_PASSWORD := password
-SQL_INIT_SCRIPT := C:\development\sharding-db-demo\init.sql
-PREPARE_DB_SCRIPT := ./prepare-db.sh  # Path to the prepare-db.sh script
+# Configuration
+NUM_CONTAINERS=4
 
-# Clean up all PostgreSQL containers including Citus
 clean:
-	@echo "Cleaning up all PostgreSQL and Citus containers..."
+	@echo "🧹 Cleaning up Multi-Master Citus cluster..."
 	@docker-compose down --volumes --remove-orphans 2>/dev/null || true
-	@for i in $(shell seq 1 $(NUM_CONTAINERS)); do \
-		CONTAINER_NAME="postgres_$$i"; \
-		if docker ps -a -q -f name=$$CONTAINER_NAME; then \
-			echo "Removing container: $$CONTAINER_NAME"; \
-			docker stop $$CONTAINER_NAME && docker rm $$CONTAINER_NAME || true; \
-		else \
-			echo "Container $$CONTAINER_NAME does not exist."; \
-		fi; \
-	done
-	@echo "All containers cleaned up."
+	@echo "✅ All containers and volumes cleaned up successfully!"
 
-# Create all PostgreSQL containers by calling prepare-db.sh script
+# Legacy commands for backward compatibility
 db:
-	@echo "Starting PostgreSQL containers using prepare-db.sh script..."
-	@bash $(PREPARE_DB_SCRIPT) $(NUM_CONTAINERS) $(BASE_PORT) $(PG_PASSWORD) $(SQL_INIT_SCRIPT)
+	@echo "Starting PostgreSQL containers using prepare-db.sh..."
+	@bash prepare-db.sh
 
-# Run the application
-run:
-	@echo "Running the application..."
-	@python app.py
-
-# Run the string-based sharding demo
-run-matrix:
-	@echo "Running the application with Matrix-style IDs..."
-	@python app_matrix.py
-
-# Prepare Citus cluster using Docker Compose
-prepare-citus:
-	@echo "Setting up Citus cluster with Docker Compose..."
+# Multi-Master Citus commands
+prepare-multi-master:
+	@echo "🚀 Setting up Multi-Master Citus cluster with Nginx load balancer..."
 	@docker-compose up -d
-	@echo "Waiting for cluster setup to complete..."
-	@docker-compose logs -f citus_setup
+	@echo "⏳ Waiting for multi-master setup to complete..."
+	@docker-compose logs -f citus_multi_master_setup
 
-# Stop Citus cluster
-stop-citus:
-	@echo "Stopping Citus cluster..."
+# Stop Multi-Master cluster
+stop-multi-master:
+	@echo "Stopping Multi-Master Citus cluster..."
 	@docker-compose stop
 
-# View Citus cluster logs
-logs-citus:
-	@echo "Showing Citus cluster logs..."
+# View Multi-Master cluster logs
+logs-multi-master:
+	@echo "Showing Multi-Master Citus cluster logs..."
 	@docker-compose logs -f
 
-# Run Citus sharding example
-run-citus:
-	@echo "Running Citus sharding example..."
-	@python citus-example.py
-
-# Connect to Citus coordinator
-connect-citus:
-	@echo "Connecting to Citus coordinator..."
-	@docker-compose exec citus_coordinator psql -U postgres
+# Run Multi-Master Citus example
+run-multi-master:
+	@echo "🚀 Running Multi-Master Citus example..."
+	@python citus-multi-master-example.py
 
 # Show cluster status
-status-citus:
-	@echo "Checking Citus cluster status..."
+status-multi-master:
+	@echo "Checking Multi-Master Citus cluster status..."
 	@docker-compose ps
+	@echo ""
+	@echo "📊 Nginx Status: http://localhost:8081"
+	@echo "🏥 Health Check: http://localhost:8080"
 
-# Rebuild and restart Citus cluster
-restart-citus: clean prepare-citus
+# Rebuild and restart Multi-Master cluster
+restart-multi-master: clean prepare-multi-master
 
-# Restart with active-active configuration (replication factor 2)
-restart-active-active: clean prepare-citus
-	@echo "✅ Cluster restarted with active-active configuration"
-	@echo "📊 Each shard replicated on 2 workers for fault tolerance"
+# Test failover by stopping coordinator 1
+test-failover-coord1:
+	@echo "🔥 Testing failover - stopping Coordinator 1..."
+	@docker-compose stop citus_coordinator1
+	@echo "⏳ Testing Nginx load balancer failover in 5 seconds..."
+	@sleep 5
+	@python -c "import psycopg2; conn=psycopg2.connect('host=localhost port=5438 user=postgres password=mypass dbname=postgres'); cur=conn.cursor(); cur.execute('SELECT COUNT(*) FROM rooms;'); print(f'✅ Nginx failover successful: {cur.fetchone()[0]} rooms accessible'); conn.close()"
+	@echo "🔄 Restarting Coordinator 1..."
+	@docker-compose start citus_coordinator1
+
+# Test failover by stopping coordinator 2
+test-failover-coord2:
+	@echo "🔥 Testing failover - stopping Coordinator 2..."
+	@docker-compose stop citus_coordinator2
+	@echo "⏳ Testing Nginx load balancer failover in 5 seconds..."
+	@sleep 5
+	@python -c "import psycopg2; conn=psycopg2.connect('host=localhost port=5438 user=postgres password=mypass dbname=postgres'); cur=conn.cursor(); cur.execute('SELECT COUNT(*) FROM rooms;'); print(f'✅ Nginx failover successful: {cur.fetchone()[0]} rooms accessible'); conn.close()"
+	@echo "🔄 Restarting Coordinator 2..."
+	@docker-compose start citus_coordinator2
+
+# Backward compatibility aliases
+prepare: prepare-multi-master
+stop-citus: stop-multi-master
+logs-citus: logs-multi-master
+run: run-multi-master
+status-citus: status-multi-master
+restart-citus: restart-multi-master
 
 # Show help for all commands
 help:
-	@echo "Available commands:"
-	@echo "  clean              - Clean up and remove all containers"
-	@echo "  db                 - Create and start PostgreSQL containers using prepare-db.sh"
-	@echo "  run                - Run the Python application with numeric IDs"
-	@echo "  run-matrix         - Run the Python application with Matrix-style IDs"
-	@echo "  prepare-citus      - Set up Citus cluster with Docker Compose (active-active)"
-	@echo "  stop-citus         - Stop Citus cluster"
-	@echo "  logs-citus         - Show Citus cluster logs"
-	@echo "  run-citus          - Run Citus sharding example"
-	@echo "  connect-citus      - Connect to Citus coordinator via psql"
-	@echo "  status-citus       - Show cluster status"
-	@echo "  restart-citus      - Clean and restart Citus cluster"
-	@echo "  restart-active-active - Restart with active-active config (replication=2)"
-	@echo "  help               - Show this help message"
+	@echo "🚀 MULTI-MASTER CITUS COMMANDS:"
+	@echo "  prepare-multi-master   - Set up Multi-Master Citus cluster with Nginx"
+	@echo "  stop-multi-master      - Stop Multi-Master cluster"
+	@echo "  logs-multi-master      - Show cluster logs"
+	@echo "  run-multi-master       - Run Multi-Master application"
+	@echo "  status-multi-master    - Show cluster status"
+	@echo "  restart-multi-master   - Clean and restart cluster"
+	@echo "  test-failover-coord1   - Test failover by stopping Coordinator 1"
+	@echo "  test-failover-coord2   - Test failover by stopping Coordinator 2"
 	@echo ""
-	@echo "🎯 Active-Active Setup:"
-	@echo "  The cluster now starts with replication_factor=2 by default"
-	@echo "  Each shard is replicated on 2 workers for fault tolerance"
+	@echo "📊 MONITORING:"
+	@echo "  Nginx Status: http://localhost:8081"
+	@echo "  Health Check: http://localhost:8080"
+	@echo ""
+	@echo "🔌 CONNECTION ENDPOINTS:"
+	@echo "  Coordinator 1: localhost:5432"
+	@echo "  Coordinator 2: localhost:5437"
+	@echo "  Nginx Load Balanced: localhost:5438"
+	@echo "  Workers: localhost:5433-5436"
+	@echo ""
+	@echo "🔄 LEGACY COMMANDS (Backward Compatibility):"
+	@echo "  clean                  - Clean up containers"
+	@echo "  prepare          - Alias for prepare-multi-master"
+	@echo "  run              - Alias for run-multi-master"
+	@echo ""
+	@echo "🎯 MULTI-MASTER FEATURES:"
+	@echo "  ✅ True multi-writer setup (2 coordinators)"
+	@echo "  ✅ Nginx load balancing with health checks"
+	@echo "  ✅ Automatic failover"
+	@echo "  ✅ Concurrent write operations"
+	@echo "  ✅ Data consistency verification"

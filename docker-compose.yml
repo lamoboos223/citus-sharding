@@ -1,19 +1,45 @@
 version: '3.8'
 
 services:
-  # Citus Coordinator
-  citus_coordinator:
+  # Citus Coordinator 1 (Primary)
+  citus_coordinator1:
     image: citusdata/citus:12.1
-    container_name: citus_coordinator
+    container_name: citus_coordinator1
     environment:
       - POSTGRES_PASSWORD=mypass
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
+      - CITUS_COORDINATOR_HOST=citus_coordinator1
     ports:
       - "5432:5432"
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - ./citus-config.sql:/docker-entrypoint-initdb.d/zzz-citus-config.sql
+      - ./multi-master-config.sql:/docker-entrypoint-initdb.d/zzz-multi-master.sql
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Citus Coordinator 2 (Secondary)
+  citus_coordinator2:
+    image: citusdata/citus:12.1
+    container_name: citus_coordinator2
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+      - CITUS_COORDINATOR_HOST=citus_coordinator2
+    ports:
+      - "5437:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./citus-config.sql:/docker-entrypoint-initdb.d/zzz-citus-config.sql
+      - ./multi-master-config.sql:/docker-entrypoint-initdb.d/zzz-multi-master.sql
     networks:
       - citus_network
     healthcheck:
@@ -99,12 +125,14 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Setup service to configure Citus cluster
-  citus_setup:
+  # Setup service to configure Multi-Master Citus cluster
+  citus_multi_master_setup:
     image: citusdata/citus:12.1
-    container_name: citus_setup
+    container_name: citus_multi_master_setup
     depends_on:
-      citus_coordinator:
+      citus_coordinator1:
+        condition: service_healthy
+      citus_coordinator2:
         condition: service_healthy
       citus_worker1:
         condition: service_healthy
@@ -120,30 +148,70 @@ services:
       - PGPASSWORD=mypass
     command: >
       bash -c "
-        echo 'Waiting for all services to be ready...'
+        echo '🚀 Setting up Multi-Master Citus Cluster...'
         sleep 5
-        echo 'Adding worker nodes to cluster...'
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker1', 5432);\"
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker2', 5432);\"
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker3', 5432);\"
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker4', 5432);\"
-        echo 'Verifying cluster setup...'
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_get_active_worker_nodes();\"
-        echo 'Citus cluster is ready!'
-        echo 'Coordinator: localhost:5432'
-        echo 'Worker 1: localhost:5433'
-        echo 'Worker 2: localhost:5434'
-        echo 'Worker 3: localhost:5435'
-        echo 'Worker 4: localhost:5436'
+        
+        echo '📝 Configuring Coordinator 1...'
+        psql -h citus_coordinator1 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker1', 5432);\"
+        psql -h citus_coordinator1 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker2', 5432);\"
+        psql -h citus_coordinator1 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker3', 5432);\"
+        psql -h citus_coordinator1 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker4', 5432);\"
+        
+        echo '📝 Configuring Coordinator 2...'
+        psql -h citus_coordinator2 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker1', 5432);\"
+        psql -h citus_coordinator2 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker2', 5432);\"
+        psql -h citus_coordinator2 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker3', 5432);\"
+        psql -h citus_coordinator2 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker4', 5432);\"
+        
+        echo '🔗 Setting up Cross-Coordinator Communication...'
+        psql -h citus_coordinator1 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_coordinator2', 5432);\"
+        psql -h citus_coordinator2 -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_coordinator1', 5432);\"
+        
+        echo '✅ Verifying Multi-Master Setup...'
+        echo '--- Coordinator 1 Workers ---'
+        psql -h citus_coordinator1 -U postgres -d postgres -c \"SELECT * FROM master_get_active_worker_nodes();\"
+        echo '--- Coordinator 2 Workers ---'
+        psql -h citus_coordinator2 -U postgres -d postgres -c \"SELECT * FROM master_get_active_worker_nodes();\"
+        
+        echo '🎯 Multi-Master Citus Cluster Ready!'
+        echo 'Coordinator 1: localhost:5432'
+        echo 'Coordinator 2: localhost:5437'
+        echo 'Workers: localhost:5433-5436'
+        echo 'Nginx Load Balancer: localhost:5438'
       "
     restart: "no"
+
+  # Nginx Load Balancer for Multi-Master
+  nginx_load_balancer:
+    image: nginx:1.25-alpine
+    container_name: nginx_load_balancer
+    depends_on:
+      citus_coordinator1:
+        condition: service_healthy
+      citus_coordinator2:
+        condition: service_healthy
+    ports:
+      - "5438:5438"  # Load balanced PostgreSQL endpoint
+      - "8080:8080"  # Health check endpoint
+      - "8081:8081"  # Nginx status and monitoring
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
 networks:
   citus_network:
     driver: bridge
 
 volumes:
-  citus_coordinator_data:
+  citus_coordinator1_data:
+  citus_coordinator2_data:
   citus_worker1_data:
   citus_worker2_data:
   citus_worker3_data:
