@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  # Citus Coordinator
+  citus_coordinator:
+    image: citusdata/citus:12.1
+    container_name: citus_coordinator
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./citus-config.sql:/docker-entrypoint-initdb.d/zzz-citus-config.sql
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Citus Worker 1
+  citus_worker1:
+    image: citusdata/citus:12.1
+    container_name: citus_worker1
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5433:5432"
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Citus Worker 2
+  citus_worker2:
+    image: citusdata/citus:12.1
+    container_name: citus_worker2
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5434:5432"
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Citus Worker 3
+  citus_worker3:
+    image: citusdata/citus:12.1
+    container_name: citus_worker3
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5435:5432"
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Citus Worker 4
+  citus_worker4:
+    image: citusdata/citus:12.1
+    container_name: citus_worker4
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5436:5432"
+    networks:
+      - citus_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Setup service to configure Citus cluster
+  citus_setup:
+    image: citusdata/citus:12.1
+    container_name: citus_setup
+    depends_on:
+      citus_coordinator:
+        condition: service_healthy
+      citus_worker1:
+        condition: service_healthy
+      citus_worker2:
+        condition: service_healthy
+      citus_worker3:
+        condition: service_healthy
+      citus_worker4:
+        condition: service_healthy
+    networks:
+      - citus_network
+    environment:
+      - PGPASSWORD=mypass
+    command: >
+      bash -c "
+        echo 'Waiting for all services to be ready...'
+        sleep 5
+        echo 'Adding worker nodes to cluster...'
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker1', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker2', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker3', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker4', 5432);\"
+        echo 'Verifying cluster setup...'
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_get_active_worker_nodes();\"
+        echo 'Citus cluster is ready!'
+        echo 'Coordinator: localhost:5432'
+        echo 'Worker 1: localhost:5433'
+        echo 'Worker 2: localhost:5434'
+        echo 'Worker 3: localhost:5435'
+        echo 'Worker 4: localhost:5436'
+      "
+    restart: "no"
+
+networks:
+  citus_network:
+    driver: bridge
+
+volumes:
+  citus_coordinator_data:
+  citus_worker1_data:
+  citus_worker2_data:
+  citus_worker3_data:
+  citus_worker4_data: 
