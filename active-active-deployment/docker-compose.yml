@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  # =======================
+  # Cluster A (ports 54xx)
+  # =======================
+  coord_a:
+    image: citusdata/citus:latest
+    container_name: coord_a
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports: ["5432:5432"]
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./citus-config.sql:/docker-entrypoint-initdb.d/zzz-citus-config.sql
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker_a1:
+    image: citusdata/citus:latest
+    container_name: worker_a1
+    environment: [POSTGRES_PASSWORD=mypass, POSTGRES_USER=postgres, POSTGRES_DB=postgres]
+    ports: ["5433:5432"]
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker_a2:
+    image: citusdata/citus:latest
+    container_name: worker_a2
+    environment: [POSTGRES_PASSWORD=mypass, POSTGRES_USER=postgres, POSTGRES_DB=postgres]
+    ports: ["5434:5432"]
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker_a3:
+    image: citusdata/citus:latest
+    container_name: worker_a3
+    environment: [POSTGRES_PASSWORD=mypass, POSTGRES_USER=postgres, POSTGRES_DB=postgres]
+    ports: ["5435:5432"]
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  setup_a:
+    image: citusdata/citus:latest
+    container_name: setup_a
+    depends_on:
+      coord_a: { condition: service_healthy }
+      worker_a1: { condition: service_healthy }
+      worker_a2: { condition: service_healthy }
+      worker_a3: { condition: service_healthy }
+    networks: [citus_net]
+    environment: [PGPASSWORD=mypass]
+    command: >
+      bash -c "
+        sleep 5;
+        psql -h coord_a -U postgres -d postgres -c \"SELECT citus_add_node('worker_a1', 5432);\";
+        psql -h coord_a -U postgres -d postgres -c \"SELECT citus_add_node('worker_a2', 5432);\";
+        psql -h coord_a -U postgres -d postgres -c \"SELECT citus_add_node('worker_a3', 5432);\";
+        psql -h coord_a -U postgres -d postgres -c \"SELECT * FROM citus_get_active_worker_nodes();\";
+      "
+    restart: "no"
+
+  # =======================
+  # Cluster B (ports 64xx)
+  # =======================
+  coord_b:
+    image: citusdata/citus:latest
+    container_name: coord_b
+    environment:
+      - POSTGRES_PASSWORD=mypass
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    ports: ["6432:5432"]
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./citus-config.sql:/docker-entrypoint-initdb.d/zzz-citus-config.sql
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker_b1:
+    image: citusdata/citus:latest
+    container_name: worker_b1
+    environment: [POSTGRES_PASSWORD=mypass, POSTGRES_USER=postgres, POSTGRES_DB=postgres]
+    ports: ["6433:5432"]
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker_b2:
+    image: citusdata/citus:latest
+    container_name: worker_b2
+    environment: [POSTGRES_PASSWORD=mypass, POSTGRES_USER=postgres, POSTGRES_DB=postgres]
+    ports: ["6434:5432"]
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker_b3:
+    image: citusdata/citus:latest
+    container_name: worker_b3
+    environment: [POSTGRES_PASSWORD=mypass, POSTGRES_USER=postgres, POSTGRES_DB=postgres]
+    ports: ["6435:5432"]
+    networks: [citus_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  setup_b:
+    image: citusdata/citus:latest
+    container_name: setup_b
+    depends_on:
+      coord_b: { condition: service_healthy }
+      worker_b1: { condition: service_healthy }
+      worker_b2: { condition: service_healthy }
+      worker_b3: { condition: service_healthy }
+    networks: [citus_net]
+    environment: [PGPASSWORD=mypass]
+    command: >
+      bash -c "
+        sleep 5;
+        psql -h coord_b -U postgres -d postgres -c \"SELECT citus_add_node('worker_b1', 5432);\";
+        psql -h coord_b -U postgres -d postgres -c \"SELECT citus_add_node('worker_b2', 5432);\";
+        psql -h coord_b -U postgres -d postgres -c \"SELECT citus_add_node('worker_b3', 5432);\";
+        psql -h coord_b -U postgres -d postgres -c \"SELECT * FROM citus_get_active_worker_nodes();\";
+      "
+    restart: "no"
+
+networks:
+  citus_net: { driver: bridge }
