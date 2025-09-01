@@ -131,11 +131,7 @@ make prepare-citus
 make run-citus
 ```
 
-### 4. Verify Active-Active Setup
-```bash
-# Check replication factor and shard distribution
-python check-citus-status.py
-```
+
 
 ## 📋 Available Commands
 
@@ -144,11 +140,6 @@ python check-citus-status.py
 | `make prepare-citus` | Start active-active cluster (replication=2) |
 | `make run-citus` | Deploy chat app with 100 rooms, 200 members, 500 messages |
 | `make clean` | Clean up all containers |
-| `make stop-citus` | Stop cluster (preserve data) |
-| `make restart-active-active` | Full restart with active-active config |
-| `make connect-citus` | Connect to coordinator via psql |
-| `make status-citus` | Show cluster status |
-| `make logs-citus` | View cluster logs |
 
 ## 🧪 Testing Fault Tolerance
 
@@ -201,3 +192,82 @@ a **production-grade, fault-tolerant, horizontally-sharded chat database** with:
 - ✅ Zero data loss on single worker failure
 - ✅ Docker Compose automation
 - ✅ Real-world chat application schema
+
+
+---
+
+                        📦 Shard Placement Overview
+                        =================================
+
+ Coordinator
+ └── routes query → correct shard group (primary preferred, replica as failover)
+
+```
+ ┌─────────────────────── citus_worker1:5432 ────────────────────────┐
+ │ PRIMARY:                                                          │
+ │   rooms_102008        room_members_102012        messages_102016  │
+ │   rooms_102011        room_members_102015        messages_102019  │
+ │                                                                   │
+ │ REPLICAS:                                                         │
+ │   rooms_102009        room_members_102013        messages_102017  │
+ │                                                                   │
+ └───────────────────────────────────────────────────────────────────┘
+
+
+ ┌─────────────────────── citus_worker2:5432 ────────────────────────┐
+ │ PRIMARY:                                                          │
+ │   rooms_102009        room_members_102013        messages_102017  │
+ │                                                                   │
+ │ REPLICAS:                                                         │
+ │   rooms_102008        room_members_102012        messages_102016  │
+ │   rooms_102010        room_members_102014        messages_102018  │
+ │                                                                   │
+ └───────────────────────────────────────────────────────────────────┘
+
+
+ ┌─────────────────────── citus_worker3:5432 ────────────────────────┐
+ │ PRIMARY:                                                          │
+ │   rooms_102010        room_members_102014        messages_102018  │
+ │                                                                   │
+ │ REPLICAS:                                                         │
+ │   rooms_102009        room_members_102013        messages_102017  │
+ │   rooms_102011        room_members_102015        messages_102019  │
+ │                                                                   │
+ └───────────────────────────────────────────────────────────────────┘
+
+
+ ┌─────────────────────── citus_worker4:5432 ────────────────────────┐
+ │ (no primaries here)                                               │
+ │                                                                   │
+ │ REPLICAS:                                                         │
+ │   rooms_102010        room_members_102014        messages_102018  │
+ │   rooms_102011        room_members_102015        messages_102019  │
+ │                                                                   │
+ └───────────────────────────────────────────────────────────────────┘
+```
+
+
+```
+
+
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ Application │ →  │  PgPool-II  │ →  │    Citus    │
+└─────────────┘    └─────────────┘    │ Coordinator │
+                                      └─────────────┘
+                                            │
+                    ┌───────────────────────┼───────────────────────┐
+                    ▼                       ▼                       ▼
+              ┌─────────┐             ┌─────────┐             ┌─────────┐
+              │Worker 1 │             │Worker 2 │             │Worker 3 │
+              └─────────┘             └─────────┘             └─────────┘
+
+
+
+# Before (Current): 
+App → Coordinator → Failed Worker = ❌ WRITE FAILS
+
+# With PgPool:
+App → PgPool → Coordinator → Failed Worker = ❌ Detection
+PgPool detects failure → Removes failed backend
+App → PgPool → Coordinator (on healthy workers) = ✅ WRITE CONTINUES
+```

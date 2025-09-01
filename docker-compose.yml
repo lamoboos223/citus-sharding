@@ -3,7 +3,8 @@ version: '3.8'
 services:
   # Citus Coordinator
   citus_coordinator:
-    image: citusdata/citus:12.1
+    image: citusdata/citus:latest
+    platform: linux/amd64            # run x86_64 image on ARM hosts
     container_name: citus_coordinator
     environment:
       - POSTGRES_PASSWORD=mypass
@@ -20,12 +21,13 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   # Citus Worker 1
   citus_worker1:
-    image: citusdata/citus:12.1
+    image: citusdata/citus:latest
+    platform: linux/amd64
     container_name: citus_worker1
     environment:
       - POSTGRES_PASSWORD=mypass
@@ -39,12 +41,13 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   # Citus Worker 2
   citus_worker2:
-    image: citusdata/citus:12.1
+    image: citusdata/citus:latest
+    platform: linux/amd64
     container_name: citus_worker2
     environment:
       - POSTGRES_PASSWORD=mypass
@@ -58,12 +61,13 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   # Citus Worker 3
   citus_worker3:
-    image: citusdata/citus:12.1
+    image: citusdata/citus:latest
+    platform: linux/amd64
     container_name: citus_worker3
     environment:
       - POSTGRES_PASSWORD=mypass
@@ -77,12 +81,13 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   # Citus Worker 4
   citus_worker4:
-    image: citusdata/citus:12.1
+    image: citusdata/citus:latest
+    platform: linux/amd64
     container_name: citus_worker4
     environment:
       - POSTGRES_PASSWORD=mypass
@@ -96,12 +101,53 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
-  # Setup service to configure Citus cluster
+  # PgPool-II (optional; pooling/load balancing to the coordinator)
+  pgpool:
+    image: bitnami/pgpool:4
+    platform: linux/arm64   # bitnami pgpool supports arm64 natively
+    container_name: pgpool
+    ports:
+      - "9999:5432"  # PgPool port (external 9999 -> internal 5432)
+      - "9898:9898"  # PCP admin port
+    depends_on:
+      citus_coordinator:
+        condition: service_healthy
+    networks:
+      - citus_network
+    environment:
+      - PGPOOL_BACKEND_NODES=0:citus_coordinator:5432
+      - PGPOOL_SR_CHECK_USER=postgres
+      - PGPOOL_SR_CHECK_PASSWORD=mypass
+      - PGPOOL_POSTGRES_USERNAME=postgres
+      - PGPOOL_POSTGRES_PASSWORD=mypass
+      - PGPOOL_ADMIN_USERNAME=admin
+      - PGPOOL_ADMIN_PASSWORD=adminpass
+      - PGPOOL_ENABLE_LDAP=no
+      - PGPOOL_NUM_INIT_CHILDREN=32
+      - PGPOOL_MAX_POOL=4
+      - PGPOOL_CHILD_LIFE_TIME=300
+      - PGPOOL_CONNECTION_LIFE_TIME=0
+      - PGPOOL_CLIENT_IDLE_LIMIT=0
+      - PGPOOL_HEALTH_CHECK_PERIOD=10
+      - PGPOOL_HEALTH_CHECK_TIMEOUT=20
+      - PGPOOL_HEALTH_CHECK_USER=postgres
+      - PGPOOL_HEALTH_CHECK_PASSWORD=mypass
+      - PGPOOL_HEALTH_CHECK_MAX_RETRIES=3
+      - PGPOOL_HEALTH_CHECK_RETRY_DELAY=1
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "5432", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Setup service to configure the Citus cluster
   citus_setup:
-    image: citusdata/citus:12.1
+    image: citusdata/citus:latest
+    platform: linux/amd64
     container_name: citus_setup
     depends_on:
       citus_coordinator:
@@ -123,12 +169,12 @@ services:
         echo 'Waiting for all services to be ready...'
         sleep 5
         echo 'Adding worker nodes to cluster...'
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker1', 5432);\"
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker2', 5432);\"
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker3', 5432);\"
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_add_node('citus_worker4', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM citus_add_node('citus_worker1', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM citus_add_node('citus_worker2', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM citus_add_node('citus_worker3', 5432);\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM citus_add_node('citus_worker4', 5432);\"
         echo 'Verifying cluster setup...'
-        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM master_get_active_worker_nodes();\"
+        psql -h citus_coordinator -U postgres -d postgres -c \"SELECT * FROM citus_get_active_worker_nodes();\"
         echo 'Citus cluster is ready!'
         echo 'Coordinator: localhost:5432'
         echo 'Worker 1: localhost:5433'
@@ -147,4 +193,4 @@ volumes:
   citus_worker1_data:
   citus_worker2_data:
   citus_worker3_data:
-  citus_worker4_data: 
+  citus_worker4_data:
