@@ -1,0 +1,75 @@
+# Static defaults; PATRONI_* env vars in docker-compose override these.
+scope: citusap
+name: coord # override per container with PATRONI_NAME
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: 0.0.0.0:8008 # override with PATRONI_RESTAPI_CONNECT_ADDRESS (e.g., coord-1:8008)
+
+etcd:
+  hosts: etcd:2379
+
+bootstrap:
+  dcs:
+    synchronous_mode: quorum
+    postgresql:
+      use_slots: true
+      parameters:
+        # Citus needs to be preloaded on all nodes
+        shared_preload_libraries: "citus,pg_stat_statements"
+        wal_level: replica
+        wal_keep_size: "256MB"
+        wal_log_hints: on
+        hot_standby: on
+        max_connections: 300
+        max_wal_senders: 20
+        max_replication_slots: 20
+      pg_hba:
+        - local   all             all                                   trust
+        - host    all             all               127.0.0.1/32         md5
+        - host    all             all               ::1/128              md5
+        # Allow containers on your Docker bridge (pin your compose network to 172.28.0.0/16)
+        - host    all             all               172.28.0.0/16        md5
+        - host    replication     repl              172.28.0.0/16        md5
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  # Safer rejoin behavior (helps during re-clone/reinit)
+  remove_data_directory_on_diverged_timelines: true
+  remove_data_directory_on_rewind_failure: true
+  # Patroni will use pg_basebackup by default; keep it simple
+  create_replica_methods:
+    - basebackup
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: 0.0.0.0:5432 # override with PATRONI_POSTGRESQL_CONNECT_ADDRESS (e.g., coord-1:5432)
+  data_dir: /var/lib/postgresql/data
+  authentication:
+    superuser:
+      username: postgres
+      password: mypass
+    replication:
+      username: repl
+      password: replpass
+  parameters:
+    # mirror critical bootstrap params at runtime too (Patroni may set them, but being explicit helps)
+    shared_preload_libraries: "citus,pg_stat_statements"
+    wal_level: replica
+    wal_keep_size: "256MB"
+    wal_log_hints: on
+    hot_standby: on
+    max_connections: 300
+    max_wal_senders: 20
+    max_replication_slots: 20
+  pg_hba:
+    - local   all             all                                   trust
+    - host    all             all               127.0.0.1/32         md5
+    - host    all             all               ::1/128              md5
+    - host    all             all               172.28.0.0/16        md5
+    - host    replication     repl              172.28.0.0/16        md5
+
+# Patroni’s Citus integration; group 0 = coordinator
+citus:
+  group: 0
+  database: postgres

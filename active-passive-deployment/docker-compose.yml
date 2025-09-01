@@ -1,0 +1,192 @@
+version: "3.8"
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.13
+    command: >
+      /usr/local/bin/etcd
+      --name etcd0
+      --data-dir /etcd
+      --advertise-client-urls http://etcd:2379
+      --listen-client-urls http://0.0.0.0:2379
+      --initial-advertise-peer-urls http://etcd:2380
+      --listen-peer-urls http://0.0.0.0:2380
+      --initial-cluster etcd0=http://etcd:2380
+      --initial-cluster-state new
+      --enable-v2=true
+    ports: ["2379:2379"]
+    networks: [citusnet]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2379/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  haproxy:
+    image: haproxy:2.9
+    depends_on: [coord-1, coord-2]
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks: [citusnet]
+    ports:
+      - "5000:5000"   # connect here (DBeaver/app)
+      - "7000:7000"   # HAProxy stats
+    restart: unless-stopped
+
+  coord-1:
+    build:
+      context: ./patroni-citus
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8008/health | jq -e '.state==\"running\"' >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    environment:
+      PATRONI_NAME: coord-1
+      PATRONI_SCOPE: citusap
+      PATRONI_ETCD_HOSTS: etcd:2379
+      PATRONI_RESTAPI_LISTEN: 0.0.0.0:8008
+      PATRONI_RESTAPI_CONNECT_ADDRESS: coord-1:8008
+      PATRONI_POSTGRESQL_LISTEN: 0.0.0.0:5432
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: coord-1:5432
+      PATRONI_SUPERUSER_USERNAME: postgres
+      PATRONI_SUPERUSER_PASSWORD: mypass
+      PATRONI_REPLICATION_USERNAME: repl
+      PATRONI_REPLICATION_PASSWORD: replpass
+      PATRONI_CITUS_GROUP: "0"
+      PATRONI_CITUS_DATABASE: postgres
+    networks: [citusnet]
+    depends_on: [etcd]
+    restart: unless-stopped
+    # mount the PARENT; Patroni will manage /var/lib/postgresql/data inside it
+    volumes:
+      - coord1_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "sh", "-lc", "pg_isready -U postgres -h 127.0.0.1 || curl -sf http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  coord-2:
+    build:
+      context: ./patroni-citus
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8008/health | jq -e '.state==\"running\"' >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    environment:
+      PATRONI_NAME: coord-2
+      PATRONI_SCOPE: citusap
+      PATRONI_ETCD_HOSTS: etcd:2379
+      PATRONI_RESTAPI_LISTEN: 0.0.0.0:8008
+      PATRONI_RESTAPI_CONNECT_ADDRESS: coord-2:8008
+      PATRONI_POSTGRESQL_LISTEN: 0.0.0.0:5432
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: coord-2:5432
+      PATRONI_SUPERUSER_USERNAME: postgres
+      PATRONI_SUPERUSER_PASSWORD: mypass
+      PATRONI_REPLICATION_USERNAME: repl
+      PATRONI_REPLICATION_PASSWORD: replpass
+      PATRONI_CITUS_GROUP: "0"
+      PATRONI_CITUS_DATABASE: postgres
+    networks: [citusnet]
+    depends_on: [etcd]
+    restart: unless-stopped
+    volumes:
+      - coord2_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "sh", "-lc", "pg_isready -U postgres -h 127.0.0.1 || curl -sf http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker1:
+    image: citusdata/citus:latest
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: postgres
+    networks: [citusnet]
+    restart: unless-stopped
+    volumes:
+      - w1_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker2:
+    image: citusdata/citus:latest
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: postgres
+    networks: [citusnet]
+    restart: unless-stopped
+    volumes:
+      - w2_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker3:
+    image: citusdata/citus:latest
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: postgres
+    networks: [citusnet]
+    restart: unless-stopped
+    volumes:
+      - w3_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  setup:
+    image: citusdata/citus:latest
+    platform: linux/amd64
+    depends_on: [haproxy, worker1, worker2, worker3]
+    environment:
+      PGPASSWORD: mypass
+    command: >
+      bash -c "
+        echo 'Waiting for leader election...'; sleep 10;
+        psql -h haproxy -p 5000 -U postgres -d postgres -c 'CREATE EXTENSION IF NOT EXISTS citus';
+        psql -h haproxy -p 5000 -U postgres -d postgres -c \"SELECT citus_add_node('worker1', 5432)\";
+        psql -h haproxy -p 5000 -U postgres -d postgres -c \"SELECT citus_add_node('worker2', 5432)\";
+        psql -h haproxy -p 5000 -U postgres -d postgres -c \"SELECT citus_add_node('worker3', 5432)\";
+        psql -h haproxy -p 5000 -U postgres -d postgres -c \"ALTER SYSTEM SET citus.shard_count = 3\";
+        psql -h haproxy -p 5000 -U postgres -d postgres -c \"ALTER SYSTEM SET citus.shard_replication_factor = 2\";
+        psql -h haproxy -p 5000 -U postgres -d postgres -c 'SELECT pg_reload_conf()';
+        psql -h haproxy -p 5000 -U postgres -d postgres -c 'SELECT * FROM citus_get_active_worker_nodes()';
+      "
+    networks: [citusnet]
+    restart: "no"
+
+networks:
+  citusnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  coord1_pg:
+  coord2_pg:
+  w1_pg:
+  w2_pg:
+  w3_pg:
